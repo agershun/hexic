@@ -34,9 +34,17 @@
 
 ### Honeycomb Cell Drawing
 - Uses LineRel pattern from 0x62b4-0x6370
-- Odd rows: LineRel(10, 4), LineRel(19, -8), LineRel(9, 4)
-- Even rows: LineRel(10, -4), LineRel(19, 8), LineRel(9, -4)
-- Cell dimensions: 19px wide, 16px tall (8 up + 8 down)
+- Row type 1 (0x62bd-0x62de): LineRel(10, 4), LineRel(19, -8), LineRel(9, 4)
+  - Goes: right+down 4px, then right+up 8px, then right+down 4px
+  - Creates peak at start, valley in middle, peak at end
+- Row type 2 (0x6336-0x6357): LineRel(10, -4), LineRel(19, 8), LineRel(9, -4)
+  - Goes: right+up 4px, then right+down 8px, then right+up 4px
+  - Creates valley at start, peak in middle, valley at end
+- Total wave width: 10 + 19 + 9 = 38px
+- Flat segment: 19px (the center part)
+- Zigzag amplitude: 8px peak-to-valley (4px up + 4px down from center)
+- Row spacing: row * 8 (from shl ax, 3 at 0x6322)
+- MoveTo position: (0xe1, row * 8 + 4) = (225, row * 8 + 4)
 
 ## Game Variables
 

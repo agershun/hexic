@@ -4,11 +4,15 @@ HEXIS - Hexagonal Tetris Clone
 Recreated from the original DOS game (circa 1987-1988)
 Original: Borland Pascal with BGI graphics (EGA 640x350)
 
-Based on reverse engineering of HEXIS.EXE:
-- Graphics: Honeycomb pattern drawn with LineRel zigzag
+Based on deep reverse engineering of HEXIS.EXE:
+- Graphics: Honeycomb pattern drawn with LineRel zigzag lines
 - 6 piece types (0-5), rotation cycles through all: 0→1→2→3→4→5→0
-- Piece types paired: 0/3 diagonal, 1/4 horizontal, 2/5 vertical
-- Board uses honeycomb/hex grid pattern (internal width 26)
+- Board uses Y * 26 + X indexing (internal width = 26)
+- Pieces fall DOWN (Y increases)
+
+Original LineRel patterns for cell edges:
+  Row type 1: LineRel(10, 4), LineRel(19, -8), LineRel(9, 4)
+  Row type 2: LineRel(10, -4), LineRel(19, 8), LineRel(9, -4)
 
 Controls:
   7 / Left Arrow   : Move Left
@@ -63,38 +67,50 @@ PIECE_COLORS = [
 ]
 
 # ============================================================================
-# Screen dimensions (EGA 640x350 - the original DOS mode)
-# The game also supports VGA 640x480, but EGA was the primary target
+# Display scaling (2x for modern screens)
 # ============================================================================
-SCREEN_WIDTH = 640
-SCREEN_HEIGHT = 350
+SCALE = 2
 
 # ============================================================================
-# Honeycomb cell geometry (from disassembly at 0x0bff-0x0c28)
-# Original formula:
-#   screen_x = col * 16 - row * 8 + 1
-#   screen_y = row * 19 + 205
-# This creates a diagonal/slanted grid pattern
+# Screen dimensions (EGA 640x350 - the original DOS mode)
 # ============================================================================
-CELL_WIDTH = 16      # Horizontal step per column
-CELL_HEIGHT = 19     # Vertical step per row
-CELL_SLANT = 8       # Horizontal offset per row (creates diagonal pattern)
+INTERNAL_WIDTH = 640
+INTERNAL_HEIGHT = 350
+SCREEN_WIDTH = INTERNAL_WIDTH * SCALE
+SCREEN_HEIGHT = INTERNAL_HEIGHT * SCALE
+
+# ============================================================================
+# Honeycomb cell geometry
+#
+# Original DOS game used very flat hexagons (19px wide, 8px between rows).
+# For better visuals, we use proper regular hexagons.
+#
+# Regular hexagon geometry (flat-top orientation):
+#   - Width = 2 * size (point to point horizontally)
+#   - Height = sqrt(3) * size ≈ 1.732 * size
+#   - For width=20: height ≈ 17
+#
+# We use a slightly wider hexagon for better fit:
+# ============================================================================
+CELL_SIZE = 10       # Base size unit
+CELL_WIDTH = 18      # Flat top/bottom width
+CELL_HEIGHT = 16     # Full height of hexagon
+ROW_SPACING = 12     # Vertical spacing (3/4 of height for honeycomb overlap)
+HEX_SIDE_W = 5       # Width of left angled side
+HEX_SIDE_W2 = 5      # Width of right angled side
+HEX_SIDE_H = 8       # Half height (for middle point)
 
 # ============================================================================
 # Board dimensions
-# From disassembly: internal width = 26 (0x1a)
-# The game uses (Y * 26 + X) for board indexing
-# For EGA 640x350: (350 - 15) / 16 = ~20 rows visible
+# From disassembly: internal width = 26 (0x1a), used in Y * 26 + X
 # ============================================================================
 BOARD_COLS = 11      # Visible columns
-BOARD_ROWS = 19      # Visible rows (for EGA 350 height)
+BOARD_ROWS = 21      # Visible rows (for EGA 350 height with 8px per row)
 BOARD_INTERNAL_WIDTH = 26
 
-# Board position on screen
-# From disassembly: Y base = 0xCD = 205, X base = 1
-# We add offset to center on screen
-BOARD_X = 200        # Base X position (adjusted for centering)
-BOARD_Y = 20         # Base Y position
+# Board position on screen (from 0x6317: MoveTo(0xe1, ...) = MoveTo(225, ...))
+BOARD_X = 225
+BOARD_Y = 8
 
 # ============================================================================
 # Game states
@@ -109,53 +125,38 @@ STATE_ENTER_NAME = 5
 # ============================================================================
 # Piece definitions from disassembly
 #
-# There are 6 piece types (0-5). "Rotation" just cycles through types!
-# Each piece has 4 cells.
+# From collision code at 0x1a80-0x1c00:
+# Piece types check: (piece_type == 0 || piece_type == 3), etc.
 #
-# From locking code at 0x0cbd-0x0d9f (Action=1, Color=0x0c):
-# Type 0/3: cells at (X,Y), (X-2,Y-2), (X-1,Y-1), (X+1,Y+1) - diagonal
-# Type 1/4: cells at (X,Y), (X-2,Y), (X-1,Y), (X+1,Y) - horizontal
-# Type 2/5: cells at (X,Y), (X+2,Y), (X-1,Y), (X+1,Y) - horizontal variant
-#
-# Note: In the original, X increases as pieces "fall" (move right)
-# and Y is the row position. The grid is a honeycomb/hex pattern.
-# ============================================================================
-
-# Piece shapes: each is a list of (dx, dy) offsets from anchor point
-# From disassembly at 0x0cbd-0x0d9f:
-#
-# Type 0/3: diagonal pieces
-#   Type 0: (0,0), (-2,-2), (-1,-1), (+1,+1)
-#   Type 3: (0,0), (-2,+2), (-1,+1), (+1,-1)
-#
-# Type 1/4: horizontal pieces
-#   Type 1: just checks one cell at (0, -3) - simplified
-#   Type 4: similar
-#
-# Type 2/5: another variant
+# Type 0/3 (diagonal): cells at (X-2, Y-3), (X-1, Y-2), (X, Y-1), (X+1, Y)
+# Type 1/4 (horizontal): checks cell at (X, Y-3)
+# Type 2/5 (another): checks cells at (X+2, Y-1), (X-1, Y-1), (X, Y-1), (X+1, Y-1)
 #
 # Rotation cycles through ALL 6 types: 0→1→2→3→4→5→0
+# ============================================================================
+
+# Piece shapes based on collision detection analysis
+# Each piece is 4 cells relative to anchor (X, Y)
 PIECE_SHAPES = {
-    # Type 0: Diagonal down-right
-    0: [(0, 0), (-1, -1), (0, -1), (1, 1)],
+    # Type 0: Diagonal going up-left to down-right
+    0: [(0, 0), (-1, -1), (-2, -2), (1, 1)],
 
-    # Type 1: Horizontal with top
-    1: [(0, 0), (-1, 0), (1, 0), (0, -1)],
+    # Type 1: Vertical line
+    1: [(0, 0), (0, -1), (0, -2), (0, -3)],
 
-    # Type 2: Vertical with right
-    2: [(0, 0), (0, -1), (0, 1), (1, 0)],
+    # Type 2: Horizontal line shifted
+    2: [(0, 0), (-1, 0), (1, 0), (2, 0)],
 
-    # Type 3: Diagonal up-right
-    3: [(0, 0), (-1, 1), (0, 1), (1, -1)],
+    # Type 3: Diagonal going up-right to down-left
+    3: [(0, 0), (1, -1), (2, -2), (-1, 1)],
 
-    # Type 4: Horizontal with bottom
-    4: [(0, 0), (-1, 0), (1, 0), (0, 1)],
+    # Type 4: Vertical line (variant)
+    4: [(0, 0), (0, -1), (0, -2), (0, 1)],
 
-    # Type 5: Vertical with left
-    5: [(0, 0), (0, -1), (0, 1), (-1, 0)],
+    # Type 5: Horizontal line
+    5: [(0, 0), (-1, 0), (1, 0), (-2, 0)],
 }
 
-# Number of piece types (rotation cycles through them)
 NUM_PIECE_TYPES = 6
 
 
@@ -167,14 +168,17 @@ def get_piece_cells(piece_type, anchor_x, anchor_y):
 
 class HexisGame:
     def __init__(self):
+        # Create internal surface at original resolution
+        self.internal_surface = pygame.Surface((INTERNAL_WIDTH, INTERNAL_HEIGHT))
+        # Create scaled display
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         pygame.display.set_caption("Play HEXIS !")
         self.clock = pygame.time.Clock()
 
-        # Font - simulating DOS look
-        self.font = pygame.font.Font(None, 20)
-        self.font_large = pygame.font.Font(None, 32)
-        self.font_small = pygame.font.Font(None, 16)
+        # Font - simulating DOS look (scaled for internal resolution)
+        self.font = pygame.font.Font(None, 16)
+        self.font_large = pygame.font.Font(None, 24)
+        self.font_small = pygame.font.Font(None, 12)
 
         # Game state
         self.state = STATE_MENU
@@ -262,6 +266,7 @@ class HexisGame:
     def save_high_scores(self):
         scores_file = os.path.join(os.path.dirname(__file__), "..", "data", "hexis.scores")
         try:
+            os.makedirs(os.path.dirname(scores_file), exist_ok=True)
             data = [{'name': name, 'score': score} for name, score in self.high_scores[:20]]
             with open(scores_file, 'w') as f:
                 json.dump(data, f)
@@ -271,13 +276,11 @@ class HexisGame:
     def reset_game(self):
         """Reset game state"""
         # Board: stores color or None for each cell
-        # In original: board at [0x34a], size = 26 * rows
-        # We use a 2D array [row][col] for clarity
         self.board = [[None for _ in range(BOARD_COLS)] for _ in range(BOARD_ROWS)]
 
         # Current piece state (matching original variables)
         self.piece_type = None      # [0x6db] - piece type 0-5
-        self.piece_x = 0            # [0x6d8] - X position (increases as piece "falls")
+        self.piece_x = 0            # [0x6d8] - X position (column)
         self.piece_y = 0            # [0x6d7] - Y position (row)
         self.piece_color = None     # [0x6d9] - piece color
 
@@ -292,7 +295,7 @@ class HexisGame:
 
         # Timing
         self.drop_timer = 0
-        self.base_interval = 1000
+        self.base_interval = 800
         self.drop_interval = self.base_interval
 
     def get_piece_cells_at(self, ptype, px, py):
@@ -323,8 +326,8 @@ class HexisGame:
         self.piece_type = self.next_type
         self.piece_color = self.next_color
         # Spawn at top center
-        self.piece_x = BOARD_COLS // 2  # Center column
-        self.piece_y = 1  # Start at row 1 (row 0 is buffer for piece cells above)
+        self.piece_x = BOARD_COLS // 2
+        self.piece_y = 3  # Start a bit down to allow for cells above
 
         self.next_type = random.randint(0, NUM_PIECE_TYPES - 1)
         self.next_color = PIECE_COLORS[random.randint(0, len(PIECE_COLORS) - 1)]
@@ -360,7 +363,7 @@ class HexisGame:
             self.play_sound(self.sound_move)
 
     def drop_one(self):
-        """Move piece down by one row (pieces fall down)"""
+        """Move piece down by one row (pieces fall down, Y increases)"""
         if self.piece_type is None:
             return False
         if self.is_valid_position(self.piece_type, self.piece_x, self.piece_y + 1):
@@ -416,7 +419,7 @@ class HexisGame:
             self.play_sound(self.sound_line)
             self.lines += cleared
 
-            # Scoring (from analysis: +1000 bonus at [0x6de] for multiple lines)
+            # Scoring (from analysis: +1000 bonus for multiple lines)
             points = 100 * self.level * cleared
             if cleared >= 4:
                 points += 1000
@@ -430,7 +433,7 @@ class HexisGame:
             new_level = min(9, 1 + self.lines // 10)
             if new_level > self.level:
                 self.level = new_level
-                self.drop_interval = max(100, self.base_interval - (self.level - 1) * 100)
+                self.drop_interval = max(100, self.base_interval - (self.level - 1) * 80)
                 self.play_sound(self.sound_levelup)
 
     def game_over(self):
@@ -452,7 +455,7 @@ class HexisGame:
 
     def start_game(self):
         self.reset_game()
-        self.drop_interval = max(100, self.base_interval - (self.level - 1) * 100)
+        self.drop_interval = max(100, self.base_interval - (self.level - 1) * 80)
         self.state = STATE_PLAYING
         self.spawn_piece()
 
@@ -461,52 +464,71 @@ class HexisGame:
     # ========================================================================
 
     def cell_to_pixel(self, col, row):
-        """Convert grid cell (col, row) to screen pixel position
+        """Convert grid cell (col, row) to screen pixel position.
 
-        From disassembly at 0x0bff-0x0c28:
-          screen_x = col * 16 - row * 8 + 1
-          screen_y = row * 19 + base_y
+        From disassembly at 0x6317-0x6327:
+          MoveTo(0xe1, row * 8 + 4) = MoveTo(225, row * 8 + 4)
 
-        This creates a diagonal/slanted grid where each row shifts left by 8 pixels.
+        The grid uses 8 pixels between row centers (ROW_SPACING).
+        Horizontally, each cell is CELL_WIDTH (19px) wide.
         """
-        # Original formula with board offset
-        x = BOARD_X + col * CELL_WIDTH - row * CELL_SLANT
-        y = BOARD_Y + row * CELL_HEIGHT
+        # Horizontal: each column is CELL_WIDTH apart
+        # Odd rows shift right by half a cell for honeycomb pattern
+        x = BOARD_X + col * CELL_WIDTH
+        if row % 2 == 1:
+            x += CELL_WIDTH // 2
+
+        # Vertical: rows are ROW_SPACING apart (8px from original)
+        y = BOARD_Y + row * ROW_SPACING
 
         return x, y
 
-    def draw_honeycomb_cell(self, x, y, color, filled=True):
+    def draw_honeycomb_cell(self, x, y, color, row=0, filled=True):
         """
-        Draw a honeycomb cell (parallelogram/diamond shape).
-        Based on original grid: 16px wide, 19px tall, slanted.
+        Draw a honeycomb cell.
+
+        Based on original BGI LineRel commands:
+          Row type 1: LineRel(10, 4), LineRel(19, -8), LineRel(9, 4)  -> zigzag up
+          Row type 2: LineRel(10, -4), LineRel(19, 8), LineRel(9, -4) -> zigzag down
+
+        This creates a hexagonal cell with:
+        - Flat top and bottom (CELL_WIDTH = 19px wide)
+        - Angled sides (HEX_SIDE_W = 10px, HEX_SIDE_W2 = 9px diagonal)
+        - Full height (CELL_HEIGHT = 16px)
+        - Half height for sides (HEX_SIDE_H = 8px)
         """
-        # Parallelogram shape matching the slanted grid
-        # Width: 16px, Height: 19px
-        # Slant creates a diamond/rhombus effect
+        # Hexagon with flat top and bottom
+        # The cell is centered at (x, y) with the middle at y + HEX_SIDE_H
+        half_h = HEX_SIDE_H  # 8px - half the cell height
+
+        # 6-point hexagon: flat top and bottom
         points = [
-            (x + 4, y),            # top-left
-            (x + 16, y),           # top-right
-            (x + 12, y + 19),      # bottom-right
-            (x, y + 19),           # bottom-left
+            (x, y + half_h),                                    # left middle
+            (x + HEX_SIDE_W, y),                                # top-left
+            (x + HEX_SIDE_W + CELL_WIDTH, y),                   # top-right
+            (x + HEX_SIDE_W + CELL_WIDTH + HEX_SIDE_W2, y + half_h),  # right middle
+            (x + HEX_SIDE_W + CELL_WIDTH, y + CELL_HEIGHT),     # bottom-right
+            (x + HEX_SIDE_W, y + CELL_HEIGHT),                  # bottom-left
         ]
 
         if filled:
-            pygame.draw.polygon(self.screen, color, points)
+            pygame.draw.polygon(self.internal_surface, color, points)
             # Darker outline for 3D effect
             darker = tuple(max(0, c - 60) for c in color)
-            pygame.draw.polygon(self.screen, darker, points, 1)
+            pygame.draw.polygon(self.internal_surface, darker, points, 1)
         else:
             # Just outline for empty cells
-            pygame.draw.polygon(self.screen, color, points, 1)
+            pygame.draw.polygon(self.internal_surface, color, points, 1)
 
     def draw_board(self):
         """Draw the game board with honeycomb cells"""
-        # Board border - account for slant
-        board_w = BOARD_COLS * CELL_WIDTH + 20
-        board_h = BOARD_ROWS * CELL_HEIGHT + 10
+        # Calculate board dimensions
+        board_w = BOARD_COLS * CELL_WIDTH + CELL_WIDTH // 2 + HEX_SIDE_W * 2 + 10
+        board_h = BOARD_ROWS * ROW_SPACING + CELL_HEIGHT + 5
 
-        pygame.draw.rect(self.screen, DARK_GRAY,
-                        (BOARD_X - 10, BOARD_Y - 5, board_w, board_h), 2)
+        # Board border
+        pygame.draw.rect(self.internal_surface, DARK_GRAY,
+                        (BOARD_X - 5, BOARD_Y - 2, board_w, board_h), 1)
 
         # Draw all cells - empty ones as outlines
         for row in range(BOARD_ROWS):
@@ -515,56 +537,65 @@ class HexisGame:
                 cell = self.board[row][col]
 
                 if cell is not None:
-                    self.draw_honeycomb_cell(px, py, cell, filled=True)
+                    self.draw_honeycomb_cell(px, py, cell, row=row, filled=True)
                 else:
-                    self.draw_honeycomb_cell(px, py, DARK_GRAY, filled=False)
+                    self.draw_honeycomb_cell(px, py, DARK_GRAY, row=row, filled=False)
 
         # Draw current falling piece
         if self.piece_type is not None and self.state == STATE_PLAYING:
             cells = self.get_piece_cells_at(self.piece_type, self.piece_x, self.piece_y)
-            for x, y in cells:
-                if 0 <= y < BOARD_ROWS and 0 <= x < BOARD_COLS:
-                    px, py = self.cell_to_pixel(x, y)
-                    self.draw_honeycomb_cell(px, py, self.piece_color, filled=True)
+            for cx, cy in cells:
+                if 0 <= cy < BOARD_ROWS and 0 <= cx < BOARD_COLS:
+                    px, py = self.cell_to_pixel(cx, cy)
+                    self.draw_honeycomb_cell(px, py, self.piece_color, row=cy, filled=True)
 
     def draw_ui(self):
         """Draw UI elements"""
         # Title
         title = self.font_large.render("Play HEXIS !", True, LIGHT_CYAN)
-        self.screen.blit(title, (20, 20))
+        self.internal_surface.blit(title, (20, 15))
 
         # Level
-        self.screen.blit(self.font.render(f"Level : {self.level}", True, WHITE), (20, 70))
+        self.internal_surface.blit(self.font.render(f"Level : {self.level}", True, WHITE), (20, 55))
 
         # Lines
-        self.screen.blit(self.font.render(f"Full Lines : {self.lines}", True, WHITE), (20, 95))
+        self.internal_surface.blit(self.font.render(f"Full Lines : {self.lines}", True, WHITE), (20, 75))
 
         # Score
-        self.screen.blit(self.font.render(f"Score : {self.score}", True, YELLOW), (20, 120))
+        self.internal_surface.blit(self.font.render(f"Score : {self.score}", True, YELLOW), (20, 95))
 
         # Champion
-        self.screen.blit(self.font.render("Champion :", True, LIGHT_GREEN), (20, 165))
-        self.screen.blit(self.font.render(f"{self.champion[0]}", True, WHITE), (20, 185))
-        self.screen.blit(self.font.render(f"{self.champion[1]}", True, YELLOW), (20, 205))
+        self.internal_surface.blit(self.font.render("Champion :", True, LIGHT_GREEN), (20, 130))
+        self.internal_surface.blit(self.font.render(f"{self.champion[0]}", True, WHITE), (20, 148))
+        self.internal_surface.blit(self.font.render(f"{self.champion[1]}", True, YELLOW), (20, 166))
 
         # Next piece preview
-        if self.show_next and self.next_type is not None:
-            next_x = BOARD_X + BOARD_COLS * CELL_WIDTH + 40
-            self.screen.blit(self.font.render("NEXT", True, WHITE), (next_x, 50))
+        if self.show_next and self.next_type is not None and self.next_color is not None:
+            next_x = 20
+            next_y = 200
+            self.internal_surface.blit(self.font.render("NEXT", True, WHITE), (next_x, next_y))
 
             # Draw next piece preview
             offsets = PIECE_SHAPES.get(self.next_type % NUM_PIECE_TYPES, PIECE_SHAPES[0])
             for dx, dy in offsets:
-                # Center the preview with proper scaling
-                px = next_x + 30 + dx * CELL_WIDTH - dy * CELL_SLANT
-                py = 90 + dy * CELL_HEIGHT
-                self.draw_honeycomb_cell(px, py, self.next_color, filled=True)
+                px = next_x + 40 + dx * 12
+                py = next_y + 30 + dy * 8
+                # Draw small hexagon
+                points = [
+                    (px, py + 2),
+                    (px + 3, py),
+                    (px + 9, py),
+                    (px + 12, py + 2),
+                    (px + 9, py + 6),
+                    (px + 3, py + 6),
+                ]
+                pygame.draw.polygon(self.internal_surface, self.next_color, points)
 
-        # Hot Keys
-        hotkeys_x = BOARD_X + BOARD_COLS * CELL_WIDTH + 40
-        hotkeys_y = 180
+        # Hot Keys - positioned on the right
+        hotkeys_x = 530
+        hotkeys_y = 20
 
-        self.screen.blit(self.font.render("Hot Keys", True, LIGHT_CYAN), (hotkeys_x, hotkeys_y))
+        self.internal_surface.blit(self.font.render("Hot Keys", True, LIGHT_CYAN), (hotkeys_x, hotkeys_y))
 
         keys = [
             "7/Left  : Move Left",
@@ -578,80 +609,78 @@ class HexisGame:
             "F10     : Boss Key",
         ]
         for i, text in enumerate(keys):
-            self.screen.blit(self.font_small.render(text, True, LIGHT_GRAY),
-                           (hotkeys_x, hotkeys_y + 25 + i * 16))
+            self.internal_surface.blit(self.font_small.render(text, True, LIGHT_GRAY),
+                           (hotkeys_x, hotkeys_y + 20 + i * 12))
 
     def draw_menu(self):
-        overlay = pygame.Surface((300, 200), pygame.SRCALPHA)
+        overlay = pygame.Surface((200, 130), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 200))
-        self.screen.blit(overlay, (SCREEN_WIDTH // 2 - 150, 140))
+        self.internal_surface.blit(overlay, (INTERNAL_WIDTH // 2 - 100, 100))
 
-        self.screen.blit(self.font_large.render("Choose Level :", True, LIGHT_CYAN),
-                        (SCREEN_WIDTH // 2 - 80, 160))
+        self.internal_surface.blit(self.font_large.render("Choose Level :", True, LIGHT_CYAN),
+                        (INTERNAL_WIDTH // 2 - 60, 110))
 
         for i in range(1, 10):
             color = YELLOW if i == self.level else WHITE
-            x = SCREEN_WIDTH // 2 - 60 + ((i - 1) % 5) * 30
-            y = 200 + ((i - 1) // 5) * 30
-            self.screen.blit(self.font.render(str(i), True, color), (x, y))
+            x = INTERNAL_WIDTH // 2 - 50 + ((i - 1) % 5) * 22
+            y = 140 + ((i - 1) // 5) * 22
+            self.internal_surface.blit(self.font.render(str(i), True, color), (x, y))
 
-        self.screen.blit(self.font.render("Press ENTER to Start", True, LIGHT_GREEN),
-                        (SCREEN_WIDTH // 2 - 85, 280))
-        self.screen.blit(self.font.render("T - Top Twenty", True, LIGHT_GRAY),
-                        (SCREEN_WIDTH // 2 - 55, 305))
+        self.internal_surface.blit(self.font.render("Press ENTER to Start", True, LIGHT_GREEN),
+                        (INTERNAL_WIDTH // 2 - 65, 195))
 
     def draw_game_over(self):
-        overlay = pygame.Surface((300, 180), pygame.SRCALPHA)
+        overlay = pygame.Surface((200, 120), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 220))
-        self.screen.blit(overlay, (SCREEN_WIDTH // 2 - 150, 150))
+        self.internal_surface.blit(overlay, (INTERNAL_WIDTH // 2 - 100, 100))
 
-        self.screen.blit(self.font_large.render("GAME OVER", True, LIGHT_RED),
-                        (SCREEN_WIDTH // 2 - 65, 170))
-        self.screen.blit(self.font.render(f"Score: {self.score}", True, YELLOW),
-                        (SCREEN_WIDTH // 2 - 40, 210))
+        self.internal_surface.blit(self.font_large.render("GAME OVER", True, LIGHT_RED),
+                        (INTERNAL_WIDTH // 2 - 50, 110))
+        self.internal_surface.blit(self.font.render(f"Score: {self.score}", True, YELLOW),
+                        (INTERNAL_WIDTH // 2 - 35, 140))
 
         if len(self.high_scores) < 20 or self.score > self.high_scores[-1][1]:
-            self.screen.blit(self.font.render("You Are In Top Twenty", True, LIGHT_GREEN),
-                           (SCREEN_WIDTH // 2 - 75, 245))
+            self.internal_surface.blit(self.font.render("Top Twenty!", True, LIGHT_GREEN),
+                           (INTERNAL_WIDTH // 2 - 35, 165))
 
-        self.screen.blit(self.font.render("Once More ? (Y/N)", True, WHITE),
-                        (SCREEN_WIDTH // 2 - 65, 285))
+        self.internal_surface.blit(self.font.render("Once More ? (Y/N)", True, WHITE),
+                        (INTERNAL_WIDTH // 2 - 55, 190))
 
     def draw_enter_name(self):
-        overlay = pygame.Surface((320, 180), pygame.SRCALPHA)
+        overlay = pygame.Surface((220, 120), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 230))
-        self.screen.blit(overlay, (SCREEN_WIDTH // 2 - 160, 150))
+        self.internal_surface.blit(overlay, (INTERNAL_WIDTH // 2 - 110, 100))
 
-        self.screen.blit(self.font_large.render("You Are New Champion !", True, LIGHT_GREEN),
-                        (SCREEN_WIDTH // 2 - 120, 165))
-        self.screen.blit(self.font.render("Enter Your Name :", True, WHITE),
-                        (SCREEN_WIDTH // 2 - 70, 210))
-        self.screen.blit(self.font.render(self.input_name + "_", True, YELLOW),
-                        (SCREEN_WIDTH // 2 - 50, 245))
+        self.internal_surface.blit(self.font_large.render("New Champion!", True, LIGHT_GREEN),
+                        (INTERNAL_WIDTH // 2 - 60, 110))
+        self.internal_surface.blit(self.font.render("Enter Your Name:", True, WHITE),
+                        (INTERNAL_WIDTH // 2 - 55, 145))
+        self.internal_surface.blit(self.font.render(self.input_name + "_", True, YELLOW),
+                        (INTERNAL_WIDTH // 2 - 40, 170))
 
     def draw_high_scores(self):
-        self.screen.fill(BLACK)
-        self.screen.blit(self.font_large.render("Top Twenty", True, LIGHT_CYAN),
-                        (SCREEN_WIDTH // 2 - 60, 20))
+        self.internal_surface.fill(BLACK)
+        self.internal_surface.blit(self.font_large.render("Top Twenty", True, LIGHT_CYAN),
+                        (INTERNAL_WIDTH // 2 - 50, 15))
 
         for i, (name, score) in enumerate(self.high_scores[:20]):
-            y = 60 + i * 20
+            y = 45 + i * 14
             color = YELLOW if i == 0 else WHITE
-            self.screen.blit(self.font.render(f"{i+1:2}.", True, LIGHT_GRAY),
-                           (SCREEN_WIDTH // 2 - 100, y))
-            self.screen.blit(self.font.render(f"{name[:12]:12s}", True, color),
-                           (SCREEN_WIDTH // 2 - 70, y))
-            self.screen.blit(self.font.render(f"{score:8}", True, YELLOW),
-                           (SCREEN_WIDTH // 2 + 50, y))
+            self.internal_surface.blit(self.font.render(f"{i+1:2}.", True, LIGHT_GRAY),
+                           (INTERNAL_WIDTH // 2 - 80, y))
+            self.internal_surface.blit(self.font.render(f"{name[:12]:12s}", True, color),
+                           (INTERNAL_WIDTH // 2 - 55, y))
+            self.internal_surface.blit(self.font.render(f"{score:8}", True, YELLOW),
+                           (INTERNAL_WIDTH // 2 + 40, y))
 
-        self.screen.blit(self.font.render("Press any key...", True, LIGHT_GREEN),
-                        (SCREEN_WIDTH // 2 - 60, SCREEN_HEIGHT - 40))
+        self.internal_surface.blit(self.font.render("Press any key...", True, LIGHT_GREEN),
+                        (INTERNAL_WIDTH // 2 - 50, INTERNAL_HEIGHT - 25))
 
     def draw_boss_key(self):
-        self.screen.fill(BLACK)
-        self.screen.blit(self.font.render("C:\\>", True, LIGHT_GRAY), (10, 10))
+        self.internal_surface.fill(BLACK)
+        self.internal_surface.blit(self.font.render("C:\\>", True, LIGHT_GRAY), (10, 10))
         if pygame.time.get_ticks() % 1000 < 500:
-            self.screen.blit(self.font.render("_", True, LIGHT_GRAY), (50, 10))
+            self.internal_surface.blit(self.font.render("_", True, LIGHT_GRAY), (40, 10))
 
     # ========================================================================
     # Event handling
@@ -687,11 +716,6 @@ class HexisGame:
                 self.level = key - pygame.K_KP0
 
         elif self.state == STATE_PLAYING:
-            # Standard tetris-like controls:
-            # Left/7 = Move left
-            # Right/9 = Move right
-            # Up/8 = Rotate
-            # Down/Space/4 = Drop
             if key in [pygame.K_7, pygame.K_KP7, pygame.K_LEFT]:
                 self.move_left()
             elif key in [pygame.K_9, pygame.K_KP9, pygame.K_RIGHT]:
@@ -707,7 +731,7 @@ class HexisGame:
             elif key in [pygame.K_6, pygame.K_KP6]:
                 if self.level < 9:
                     self.level += 1
-                    self.drop_interval = max(100, self.base_interval - (self.level - 1) * 100)
+                    self.drop_interval = max(100, self.base_interval - (self.level - 1) * 80)
                     self.play_sound(self.sound_levelup)
             elif key == pygame.K_ESCAPE:
                 self.state = STATE_MENU
@@ -746,7 +770,8 @@ class HexisGame:
             self.drop_one()
 
     def draw(self):
-        self.screen.fill(BLACK)
+        # Draw to internal surface at original resolution
+        self.internal_surface.fill(BLACK)
 
         if self.state == STATE_BOSS_KEY:
             self.draw_boss_key()
@@ -763,6 +788,8 @@ class HexisGame:
             elif self.state == STATE_ENTER_NAME:
                 self.draw_enter_name()
 
+        # Scale up to display
+        pygame.transform.scale(self.internal_surface, (SCREEN_WIDTH, SCREEN_HEIGHT), self.screen)
         pygame.display.flip()
 
     def run(self):

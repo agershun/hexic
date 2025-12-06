@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Play HEXIS!</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #000;
+            color: #0ff;
+            font-family: 'Courier New', monospace;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #0ff;
+            text-shadow: 0 0 10px #0ff;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #888;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        #jsdos {
+            width: 640px;
+            height: 400px;
+        }
+
+        .controls {
+            margin-top: 20px;
+            color: #aaa;
+            text-align: center;
+            max-width: 640px;
+        }
+
+        .controls h3 {
+            color: #0ff;
+            margin-bottom: 10px;
+        }
+
+        .controls-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 5px 30px;
+            text-align: left;
+            font-size: 13px;
+        }
+
+        .key {
+            color: #ff5;
+        }
+
+        .info {
+            margin-top: 20px;
+            color: #666;
+            font-size: 12px;
+            text-align: center;
+        }
+
+        a {
+            color: #0aa;
+        }
+    </style>
+</head>
+<body>
+    <h1>Play HEXIS!</h1>
+    <p class="subtitle">Original DOS Game (circa 1987-1988) running in browser via js-dos</p>
+
+    <div id="jsdos"></div>
+
+    <div class="controls">
+        <h3>Hot Keys</h3>
+        <div class="controls-grid">
+            <div><span class="key">7 / Left / Numpad 7</span> : Move Left</div>
+            <div><span class="key">9 / Right / Numpad 9</span> : Move Right</div>
+            <div><span class="key">8 / Up / Numpad 8</span> : Rotate</div>
+            <div><span class="key">4 / Space / Numpad 4</span> : Drop</div>
+            <div><span class="key">1 / Numpad 1</span> : Next On/Off</div>
+            <div><span class="key">3 / Numpad 3</span> : Sound On/Off</div>
+            <div><span class="key">6 / Numpad 6</span> : Increase Level</div>
+            <div><span class="key">Esc</span> : Restart</div>
+        </div>
+    </div>
+
+    <div class="info">
+        <p>Powered by <a href="https://js-dos.com" target="_blank">js-dos</a> DOS emulator</p>
+        <p>Hexagonal Tetris clone from the DOS era</p>
+        <p style="margin-top: 10px;">Click on the game window to capture keyboard input</p>
+    </div>
+
+    <!-- js-dos v8 from CDN -->
+    <link rel="stylesheet" href="https://v8.js-dos.com/latest/js-dos.css">
+    <script src="https://v8.js-dos.com/latest/js-dos.js"></script>
+
+    <script>
+        Dos(document.getElementById("jsdos"), {
+            url: "data/hexis.jsdos",
+        });
+    </script>
+</body>
+</html>
