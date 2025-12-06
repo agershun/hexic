@@ -38,6 +38,11 @@
         #jsdos {
             width: 640px;
             height: 400px;
+            background: #111;
+        }
+
+        canvas {
+            display: block;
         }
 
         .controls {
@@ -80,7 +85,9 @@
     <h1>Play HEXIS!</h1>
     <p class="subtitle">Original DOS Game (circa 1987-1988) running in browser via js-dos</p>
 
-    <div id="jsdos"></div>
+    <div id="jsdos">
+        <canvas id="canvas" width="640" height="400"></canvas>
+    </div>
 
     <div class="controls">
         <h3>Hot Keys</h3>
@@ -102,12 +109,11 @@
         <p style="margin-top: 10px;">Click on the game window to capture keyboard input</p>
     </div>
 
-    <!-- js-dos v7 (local files) -->
-    <link rel="stylesheet" href="js-dos/js-dos.css">
+    <!-- js-dos 6.22 (local files) -->
     <script src="js-dos/js-dos.js"></script>
     <script>
-        Dos(document.getElementById("jsdos"), {
-            wdosboxUrl: "js-dos/wdosbox.js",
+        Dos(document.getElementById("canvas"), {
+            wdosboxUrl: "js-dos/wdosbox.js"
         }).ready(function(fs, main) {
             fs.extract("data/hexis.jsdos").then(function() {
                 main(["-c", "HEXIS.EXE"]);
