@@ -101,13 +101,36 @@
         <p style="margin-top: 10px;">Click on the game window to capture keyboard input</p>
     </div>
 
-    <!-- js-dos v8 from CDN -->
-    <link rel="stylesheet" href="https://v8.js-dos.com/latest/js-dos.css">
-    <script src="https://v8.js-dos.com/latest/js-dos.js"></script>
-
+    <!-- js-dos v8 from CDN with fallback -->
+    <link rel="stylesheet" href="https://v8.js-dos.com/latest/js-dos.css"
+          onerror="this.href='https://unpkg.com/js-dos@8/dist/js-dos.css'">
+    <script src="https://v8.js-dos.com/latest/js-dos.js"
+            onerror="loadFallback()"></script>
     <script>
-        Dos(document.getElementById("jsdos"), {
-            url: "data/hexis.jsdos",
+        function loadFallback() {
+            var script = document.createElement('script');
+            script.src = 'https://unpkg.com/js-dos@8/dist/js-dos.js';
+            script.onload = startGame;
+            script.onerror = function() {
+                document.getElementById('jsdos').innerHTML =
+                    '<p style="color:#f55;padding:20px;">Failed to load js-dos. Please try again later or check your internet connection.</p>';
+            };
+            document.head.appendChild(script);
+        }
+
+        function startGame() {
+            if (typeof Dos !== 'undefined') {
+                Dos(document.getElementById("jsdos"), {
+                    url: "data/hexis.jsdos",
+                });
+            }
+        }
+
+        // Start game when primary CDN loads successfully
+        window.addEventListener('load', function() {
+            if (typeof Dos !== 'undefined') {
+                startGame();
+            }
         });
     </script>
 </body>
